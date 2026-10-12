@@ -388,6 +388,7 @@ function connectSupabase(silent){
 }
 async function sbPush(){
   if(!sb||!sbConnected) return $('sbStatus').textContent='Connect Supabase first.';
+  if(currentUser==='admin') return $('sbStatus').textContent='Backdoor is local-only — log in as josh to sync.';
   $('sbStatus').textContent='Pushing…';
   try{
     const {error}=await sb.from('finance_states').upsert({user_name:currentUser,data:state,updated_at:new Date().toISOString()},{onConflict:'user_name'});
@@ -398,6 +399,7 @@ async function sbPush(){
 }
 async function sbPull(){
   if(!sb||!sbConnected) return $('sbStatus').textContent='Connect Supabase first.';
+  if(currentUser==='admin') return $('sbStatus').textContent='Backdoor is local-only — log in as josh to sync.';
   $('sbStatus').textContent='Pulling…';
   try{
     const {data,error}=await sb.from('finance_states').select('data').eq('user_name',currentUser).single();
