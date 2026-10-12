@@ -1,23 +1,35 @@
-# JOSH Finance — host on pages.dev + Supabase
+# JOSH Finance — host on pages.dev + Supabase (SECURE)
 
 Static site (no build). Folder `JOSH/` is the site root.
 
-## 1. Supabase setup (5 min)
-1. Go to https://supabase.com → New project.
-2. SQL Editor → paste + Run `supabase.sql` (creates `finance_states` table).
-3. Project Settings → API → copy `Project URL` + `anon public` key.
-4. Option A (recommended): open app locally → Sync card → paste URL + key → **Connect** → **Push to cloud**.
-   Option B: edit `supabase-config.js` with real values before deploying.
+## 0. First run — permanent superadmin (no secret in git)
+1. Open the app → username `josh` → a strong password (min 12 chars, mixed) → **Register**.
+2. First-ever `josh` becomes **👑 superadmin, approved forever**. The seat then locks — no one else can claim it.
+3. The password is hashed (PBKDF2-SHA256, 210k iterations, 16-byte salt) and the field is wiped. **The repo never contains any password.**
 
-## 2. Deploy to Cloudflare Pages (pages.dev)
-- Dashboard → Workers & Pages → Create → Pages → Upload assets **or** Connect Git.
-- Upload / git folder = contents of `JOSH/` (`index.html`, `styles.css`, `app.js`, `favicon.svg`, `site.webmanifest`, `supabase-config.js`, `supabase.sql` not required online).
-- Build command: **none**. Output dir: **/** (root).
-- You get `https://josh-xxx.pages.dev`. Custom domain optional.
-- HTTPS + CDN + no server needed. Supabase handles sync.
+## 1. Approvals — how users join
+- Anyone else: Register → sees **“waiting for admin approval”**. Record stays **pending forever** until decided.
+- Further Login/Register attempts show **“approval pending”** / **“account yet to be approved”**.
+- Superadmin `josh`: topbar 🔔 bell + 👑 dashboard lists queue (Approve/Reject), full user list with status pills. Polls local + Supabase cloud every 90s.
+- Cloud mirror holds **status/role only** (`user_approvals`) — never passwords/salts/hashes, which stay on each device. A user approved in cloud still Registers once per new device to set that device's password (by design).
 
-## 3. Security notes
-- Local login now uses PBKDF2-SHA256 (120k iterations) + 16-byte salt + 5-try/5-min lockout + 12h expiring sessions.
-- Never commit real keys to public git — prefer Option A (localStorage) or Pages env + inject at build.
-- For production, tighten `supabase.sql` RLS to per-user (`auth.uid()`) and use Supabase Auth instead of local usernames.
-- `supabase-config.js` ships with placeholders — safe to deploy, app runs in local mode until you Connect.
+## 2. Supabase setup
+1. supabase.com → New project → SQL Editor → Run `supabase.sql`, then `supabase-approval.sql`.
+2. Project Settings → API → copy URL + `anon` key (never `service_role` in frontend).
+3. App → Sync card → paste → **Connect** → **Push to cloud** / **Pull cloud queue**.
+4. `supabase-config.js` stays placeholders in git — configure at runtime (localStorage), not in the repo.
+
+## 3. GitHub via SSH (recommended over HTTPS)
+- **Why SSH is better:** no tokens in URLs, no expiry pasting, private key never leaves your PC, supports signed commits, per-host keys. HTTPS needs a PAT that can leak in logs/history.
+- Key already at `~/.ssh/id_ed25519.pub` (ed25519). Add to GitHub: Settings → SSH and GPG keys → New SSH key → paste `.pub` → `ssh -T git@github.com` should say “Hi jaycode100-sys!”.
+- Remote is `git@github.com:jaycode100-sys/josh-finance.git`. Push: `git push -u origin main`.
+- Protect repo: Settings → Branches → protect `main`; enable 2FA on the account.
+
+## 4. Deploy to Cloudflare Pages (pages.dev)
+- Dash → Workers & Pages → Create → Pages → Connect Git → `jaycode100-sys/josh-finance`, build = none, output = `/` → `https://josh-finance.pages.dev`.
+- HTTPS enforced. No server. Supabase handles sync.
+
+## 5. Security notes
+- PBKDF2-SHA256 210k + salt + timing-safe compare + 5-try/5-min lockout + 12h sessions + strength meter + instant field wipe.
+- Pending rows are never auto-deleted. Rejected users stay rejected until superadmin re-approves.
+- For full multi-device password auth (not just status), migrate to Supabase Auth + Edge Function bcrypt + RLS `auth.uid()` — static-only hashing can't safely share verifiers.

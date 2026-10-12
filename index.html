@@ -24,6 +24,7 @@
     <img src="./favicon.svg" alt="JOSH" class="auth-logo" width="64" height="64" />
     <h1>JOSH Finance</h1>
     <p class="hint">Private per-user vault. PBKDF2-hashed passwords, lockout protection & expiring sessions.<br>Use the same login on pages.dev to sync via Supabase.</p>
+    <p id="setupHint" class="hint" style="border:1px dashed var(--gold);border-radius:10px;padding:8px 10px"></p>
     <label for="authUser">Username <span class="req">a–z 0–9 _ · 3–20 chars</span></label><input id="authUser" placeholder="e.g. josh" autocomplete="username" maxlength="20" />
     <label for="authPass">Password <button id="showPass" type="button" class="linklike">show</button></label>
     <input id="authPass" type="password" placeholder="min 8 chars, mix of cases/numbers/symbols" autocomplete="current-password" />
@@ -35,7 +36,7 @@
     </div>
     <button id="guestBtn" class="ghost full">Continue as guest (local only)</button>
     <p id="authMsg" class="hint" role="alert"></p>
-    <p class="hint tiny">Sessions expire after 12h • 5 wrong tries = 5-min lock • data never leaves your device unless Supabase sync is connected.</p>
+    <p class="hint tiny">New here? Register → <b>waiting for admin approval</b>. Your request stays saved until superadmin approves or rejects. Further logins show “approval pending”.<br>Sessions expire after 12h • 5 wrong tries = 5-min lock • secrets never enter git.</p>
   </div>
 </div>
 
@@ -44,7 +45,7 @@
     <img src="./favicon.svg" alt="J$" class="logo-img" width="46" height="46" />
     <div>
       <h1>JOSH Finance <span class="ver">v2</span></h1>
-      <p>₦-base • Live $ conversion • PDF • Sync • <span id="userBadge">—</span> <span id="cloudBadge" class="cloud-badge" title="Supabase cloud status">○ local</span></p>
+      <p>₦-base • Live $ conversion • PDF • Sync • <span id="userBadge">—</span> <span id="roleBadge" class="cloud-badge">—</span> <span id="cloudBadge" class="cloud-badge" title="Supabase cloud status">○ local</span> <button id="adminBell" class="bell hidden" title="Pending approvals">🔔 <span id="pendingCount">0</span></button></p>
     </div>
   </div>
   <div class="top-actions">
@@ -141,6 +142,18 @@
       <small id="sbStatus" class="hint">Not connected — local mode. See README-DEPLOY.md.</small><br>
       <small id="syncMeta" class="hint"></small><br>
       <button id="resetBtn" class="ghost danger sm">Reset month data</button>
+    </section>
+
+    <section class="card small hidden" id="adminCard">
+      <h2>👑 Superadmin — approvals <span id="adminPendingPill" class="pill">0 pending</span></h2>
+      <p class="hint">Only <b>josh</b> sees this. New registrations stay <b>pending forever</b> until you approve or reject. They cannot log in before approval.</p>
+      <div class="sync-btns">
+        <button id="adminRefresh" class="ghost sm">↻ Refresh queue</button>
+        <button id="adminPullCloud" class="ghost sm gold">☁ Pull cloud queue</button>
+      </div>
+      <div id="approvalList" class="breakdown"></div>
+      <h3 class="gold-h">All users</h3>
+      <div id="userList" class="breakdown"></div>
     </section>
   </aside>
 

@@ -1,8 +1,10 @@
-// JOSH Finance Tracker v3 — NGN base, live FX, PDF, hardened login, Supabase cloud
-const USERS_KEY = 'joshUsersV2'; // V2 = salted PBKDF2 (V1 SHA-256 deprecated)
+// JOSH Finance Tracker v4 — NGN base, live FX, PDF, superadmin approvals, Supabase cloud
+const USERS_KEY = 'joshUsersV3'; // V3 = roles + approval status (V1/V2 retired, must re-register once)
 const SESSION_KEY = 'joshSessionV2';
 const SESSION_TTL = 12*3600*1000;
 const MAX_FAIL = 5, LOCK_MS = 5*60*1000;
+const PBKDF2_ITER = 210000; // OWASP 2023 minimum for PBKDF2-HMAC-SHA-256
+const SUPERADMIN = 'josh'; // the one and only superadmin username
 const SB_CFG_KEY = 'joshSbConfig';
 const dataKey = u => 'joshFinanceV2_' + u;
 const $ = id => document.getElementById(id);
@@ -95,11 +97,33 @@ async function doRegister(){
     if(!validUser(u)) return $('authMsg').textContent='Username: 3–20 chars, lowercase letters/numbers/_ only.';
     if(p.length<8) return $('authMsg').textContent='Password must be at least 8 characters.';
     if(pwScore(p)<2) return $('authMsg').textContent='Password too weak — mix upper/lowercase, numbers and symbols.';
-    const users=getUsers();if(users[u]) return $('authMsg').textContent='Username taken — try Login.';
+    const users=getUsers();
+    if(users[u]){
+      const st=users[u].status||'approved';
+      if(st==='pending') return $('authMsg').textContent='Approval pending — waiting for admin approval.';
+      if(st==='rejected') return $('authMsg').textContent='Account rejected — contact superadmin (josh).';
+      return $('authMsg').textContent='Username taken — try Login.';
+    }
+    // superadmin seat is taken exactly once (first-ever josh registration)
+    if(u===SUPERADMIN && Object.values(users).some(r=>r.role==='superadmin')){
+      return $('authMsg').textContent='Reserved superadmin name — contact josh.';
+    }
+    const isFirstSuperadmin=(u===SUPERADMIN && !Object.values(users).some(r=>r.role==='superadmin'));
     const salt=b64e(crypto.getRandomValues(new Uint8Array(16)));
-    const iter=120000;
-    users[u]={salt,iter,hash:await pbkdf2Hex(p,salt,iter),created:new Date().toISOString(),failed:0,lockUntil:0};
-    setUsers(users);$('authMsg').textContent='Registered — welcome!';
+    const rec={salt,iter:PBKDF2_ITER,hash:await pbkdf2Hex(p,salt,PBKDF2_ITER),created:new Date().toISOString(),failed:0,lockUntil:0,
+      role:isFirstSuperadmin?'superadmin':'user', status:isFirstSuperadmin?'approved':'pending'};
+    // never store plaintext; wipe field immediately
+    $('authPass').value='';
+    users[u]=rec; setUsers(users);
+    mirrorApprovalToCloud(u,rec);
+    if(rec.status==='pending'){
+      $('authMsg').textContent='Registered ✓ — waiting for admin approval. It stays saved until josh approves. Further logins will show “approval pending”.';
+      toast('Waiting for admin approval ⏳');
+      // nudge superadmin on this device
+      try{localStorage.setItem('joshPendingPing',JSON.stringify({u,at:new Date().toISOString()}))}catch{}
+      return;
+    }
+    $('authMsg').textContent='Superadmin created — welcome, josh 👑';
     loginAs(u);
   }finally{btn.disabled=false}
 }
@@ -111,35 +135,86 @@ async function doLogin(){
     if(!validUser(u)&&u!=='guest') return $('authMsg').textContent='Invalid username format.';
     if(u==='guest'){loginAs('guest');return}
     const users=getUsers(),rec=users[u];
+    if(rec&&rec.cloudOnly&&!rec.hash){
+      // stub synced from another device — password never leaves that device by design
+      if(rec.status==='pending') return $('authMsg').textContent='Approval pending — registered on another device, waiting for superadmin.';
+      if(rec.status==='approved') return $('authMsg').textContent='Approved ✓ — now Register once on THIS device with the same username to set its password.';
+      return $('authMsg').textContent='Account rejected — contact superadmin (josh).';
+    }
     if(!rec){
-      // legacy V1 hint
-      try{const old=JSON.parse(localStorage.getItem('joshUsersV1'))||{};if(old[u]){$('authMsg').textContent='Security upgraded — please Register again once (old hash retired).';return}}catch{}
+      // maybe registered on another device and pending in cloud?
+      const cloud=await fetchCloudApproval(u);
+      if(cloud==='pending') return $('authMsg').textContent='Approval pending — account yet to be approved by superadmin.';
+      if(cloud==='rejected') return $('authMsg').textContent='Account rejected — contact superadmin (josh).';
       return $('authMsg').textContent='No such user — Register first.';
     }
     if(rec.lockUntil&&rec.lockUntil>Date.now()){
       const m=Math.ceil((rec.lockUntil-Date.now())/60000);
       return $('authMsg').textContent=`Locked — too many tries. Retry in ${m} min.`;
     }
-    const h=await pbkdf2Hex(p,rec.salt,rec.iter);
+    const h=await pbkdf2Hex(p,rec.salt,rec.iter||PBKDF2_ITER);
+    $('authPass').value='';
     if(!timingSafe(h,rec.hash)){
       rec.failed=(rec.failed||0)+1;
       if(rec.failed>=MAX_FAIL){rec.lockUntil=Date.now()+LOCK_MS;rec.failed=0;$('authMsg').textContent=`5 wrong tries — locked 5 minutes.`}
       else $('authMsg').textContent=`Wrong password (${MAX_FAIL-rec.failed} tries left).`;
       setUsers(users);return;
     }
+    // password correct — now gate on approval (never reveal pending state on wrong password)
+    const st=rec.status||'approved';
+    if(st==='pending') return $('authMsg').textContent='Approval pending — account yet to be approved by superadmin.';
+    if(st==='rejected') return $('authMsg').textContent='Account rejected — contact superadmin (josh).';
     rec.failed=0;rec.lockUntil=0;setUsers(users);
     loginAs(u);
   }finally{btn.disabled=false}
 }
+function isSuperadmin(){try{return (getUsers()[currentUser]?.role==='superadmin')}catch{return false}}
+function pendingUsers(){return Object.entries(getUsers()).filter(([u,r])=>r.status==='pending').map(([u,r])=>({u,r})).sort((a,b)=>a.r.created.localeCompare(b.r.created))}
 function loginAs(u){
-  currentUser=u;setSession(u);
+  currentUser=u;
+  if(u!=='guest') setSession(u);
   state=loadUser(u)||loadUser('guest')||seedForUser();
   localStorage.setItem(dataKey(u),JSON.stringify(state));
   $('authOverlay').classList.add('hidden');
-  $('userBadge').textContent=u;$('syncUser').textContent=u;$('sessInfo').textContent=sessLeft();
+  const role=u==='guest'?'guest':(getUsers()[u]?.role||'user');
+  $('userBadge').textContent=u;$('syncUser').textContent=u;
+  $('roleBadge').textContent=role==='superadmin'?'👑 superadmin':role;
+  $('sessInfo').textContent=u==='guest'?'guest session':sessLeft();
   fillSettings();setTxType('expense');renderBudgets();initSupabaseFromStore();
-  fetchLiveFX();render();
-  toast('Welcome, '+u+' ✓');
+  renderAdmin();fetchLiveFX();render();
+  toast(u==='guest'?'Guest mode (local only)':'Welcome, '+u+' ✓');
+}
+// ---------- superadmin approvals (pending persists forever until decided) ----------
+function renderAdmin(){
+  const admin=isSuperadmin();
+  $('adminCard').classList.toggle('hidden',!admin);
+  $('adminBell').classList.toggle('hidden',!admin);
+  if(!admin) return;
+  refreshAdminList();
+}
+function refreshAdminList(){
+  const pend=pendingUsers();
+  $('pendingCount').textContent=pend.length;
+  $('adminPendingPill').textContent=pend.length+' pending';
+  $('approvalList').innerHTML=pend.length?pend.map(({u,r})=>`<div class="brow"><span>🧑 ${esc(u)}<br><small style="color:var(--mut)">registered ${esc((r.created||'').slice(0,16))} • <span class="status-pending">pending</span></small></span><span><button class="approve" data-a="${esc(u)}">Approve</button> <button class="reject" data-r="${esc(u)}">Reject</button></span></div>`).join(''):'<p class="hint">Queue empty — new registrations will appear here and stay until you decide.</p>';
+  const all=Object.entries(getUsers()).sort((a,b)=>(b[1].created||'').localeCompare(a[1].created||''));
+  $('userList').innerHTML=all.map(([u,r])=>`<div class="brow"><span>${r.role==='superadmin'?'👑':''} ${esc(u)} <span class="status-${r.status||'approved'}">${r.status||'approved'}</span><br><small style="color:var(--mut)">${esc(r.role)} • ${esc((r.created||'').slice(0,16))}</small></span><span>${r.role!=='superadmin'?`<button class="approve" data-a="${esc(u)}">✓</button> <button class="reject" data-r="${esc(u)}">×</button>`:''}</span></div>`).join('');
+  document.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>decideUser(b.dataset.a,'approved'));
+  document.querySelectorAll('[data-r]').forEach(b=>b.onclick=()=>decideUser(b.dataset.r,'rejected'));
+}
+function decideUser(u,status){
+  const users=getUsers();if(!users[u])return;
+  users[u].status=status;setUsers(users);
+  mirrorApprovalToCloud(u,users[u]);
+  refreshAdminList();
+  toast(u+' → '+status+(status==='approved'?' ✓':' ✕'));
+}
+function setupHint(){
+  const users=getUsers();
+  const hasSuper=Object.values(users).some(r=>r.role==='superadmin');
+  $('setupHint').innerHTML=hasSuper
+    ? `Superadmin seat taken 👑. New users: Register → <b>waiting for admin approval</b>. josh approves in 👑 dashboard (🔔 bell).`
+    : `First run: create the permanent superadmin — type <b>josh</b> + your password and click <b>Register</b>. That seat locks forever; everyone else queues for approval.`;
 }
 
 // ---------- Supabase cloud (for pages.dev) ----------
@@ -184,6 +259,29 @@ async function sbPull(){
     if(data?.data){restoreObj(data.data);$('sbStatus').textContent='Pulled ✓ '+new Date().toLocaleTimeString()}
     else $('sbStatus').textContent='No cloud row yet — Push first.';
   }catch(e){$('sbStatus').textContent='Pull failed: '+e.message}
+}
+// Approvals mirror: status/role ONLY — never password, salt, or hash leaves the device.
+async function mirrorApprovalToCloud(u,rec){
+  if(!sb||!sbConnected) return;
+  try{await sb.from('user_approvals').upsert({user_name:u,role:rec.role,status:rec.status,updated_at:new Date().toISOString()},{onConflict:'user_name'})}catch{}
+}
+async function fetchCloudApproval(u){
+  if(!sb||!sbConnected) return null;
+  try{const {data}=await sb.from('user_approvals').select('status').eq('user_name',u).single();return data?.status||null}catch{return null}
+}
+async function pullCloudQueue(){
+  if(!sb||!sbConnected) return toast('Connect Supabase first');
+  try{
+    const {data,error}=await sb.from('user_approvals').select('user_name,role,status').eq('status','pending');
+    if(error)throw error;
+    const users=getUsers();let added=0;
+    (data||[]).forEach(r=>{
+      if(!users[r.user_name]){users[r.user_name]={role:r.role||'user',status:'pending',created:new Date().toISOString(),failed:0,lockUntil:0,cloudOnly:true,salt:'',iter:PBKDF2_ITER,hash:''};added++}
+      else if(users[r.user_name].status!==r.status && users[r.user_name].role!=='superadmin'){users[r.user_name].status=r.status}
+    });
+    setUsers(users);refreshAdminList();
+    toast(added?added+' pending pulled from cloud ☁':'Queue in sync ✓');
+  }catch(e){toast('Cloud queue failed: '+e.message)}
 }
 
 // ---------- live FX ----------
@@ -412,14 +510,18 @@ function generatePDF(){
 document.addEventListener('DOMContentLoaded',()=>{
   $('authPass').addEventListener('input',updatePwMeter);
   $('showPass').onclick=()=>{const p=$('authPass');p.type=p.type==='password'?'text':'password';$('showPass').textContent=p.type==='password'?'show':'hide'};
+  setupHint();
   const sess=getSession();
-  if(sess){currentUser=sess.u;state=loadUser(sess.u)||seedForUser();$('authOverlay').classList.add('hidden');$('userBadge').textContent=sess.u;$('syncUser').textContent=sess.u;$('sessInfo').textContent=sessLeft()}
+  if(sess){currentUser=sess.u;state=loadUser(sess.u)||seedForUser();$('authOverlay').classList.add('hidden');$('userBadge').textContent=sess.u;$('syncUser').textContent=sess.u;$('roleBadge').textContent=(getUsers()[sess.u]?.role==='superadmin'?'👑 superadmin':'user');$('sessInfo').textContent=sessLeft()}
   $('loginBtn').onclick=doLogin;$('registerBtn').onclick=doRegister;
   $('guestBtn').onclick=()=>loginAs('guest');
   $('authPass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
   $('authUser').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
   $('logoutBtn').onclick=()=>{localStorage.removeItem(SESSION_KEY);location.reload()};
-  if(state){fillSettings();setTxType('expense');renderBudgets();initSupabaseFromStore();render();fetchLiveFX()}
+  if(state){fillSettings();setTxType('expense');renderBudgets();initSupabaseFromStore();renderAdmin();render();fetchLiveFX()}
+  $('adminRefresh').onclick=()=>{refreshAdminList();toast('Queue refreshed')};
+  $('adminPullCloud').onclick=pullCloudQueue;
+  $('adminBell').onclick=()=>document.getElementById('adminCard').scrollIntoView({behavior:'smooth'});
   $('saveSettings').onclick=saveSettings;$('addTx').onclick=addTx;
   $('tabExpense').onclick=()=>setTxType('expense');$('tabIncome').onclick=()=>setTxType('income');
   $('monthlyIncomeNGN').oninput=updatePeeks;$('fxRate').oninput=updatePeeks;
@@ -438,8 +540,25 @@ document.addEventListener('DOMContentLoaded',()=>{
   $('importCsv').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{const ls=r.result.split('\n').slice(1);ls.forEach(l=>{const p=l.split(',');if(p[0]&&p[3]){const n=parseFloat(p[3])||0;state.txs.push({id:uid(),type:'expense',date:p[0].trim(),category:'Other',amountNGN:n,amountUSD:+(n/fx()).toFixed(2),fxUsed:fx(),note:'csv import'})}});save();render()};r.readAsText(f)};
   $('pdfBtn').onclick=generatePDF;$('pdfBtn2').onclick=generatePDF;
   $('runForecast').onclick=renderIncomeForecast;$('fcYears').onchange=renderIncomeForecast;$('fcCur').onchange=renderIncomeForecast;
-  window.addEventListener('storage',e=>{if(e.key===dataKey(currentUser)){state=loadUser(currentUser);render()}});
+  window.addEventListener('storage',e=>{
+    if(e.key===dataKey(currentUser)){state=loadUser(currentUser);render()}
+    if(e.key===USERS_KEY||e.key==='joshPendingPing'){
+      setupHint();
+      if(isSuperadmin()){
+        const before=$('pendingCount').textContent;
+        refreshAdminList();
+        if($('pendingCount').textContent!==before&&document.hidden===false) toast('🔔 New registration awaiting approval');
+      }
+    }
+  });
   setInterval(()=>{const t=todayStr();if(state&&!state.fxHistory.find(h=>h.date===t))fetchLiveFX()},6*3600*1000);
   setInterval(()=>{if(currentUser)$('sessInfo').textContent=sessLeft()},60000);
+  setInterval(()=>{if(isSuperadmin()&&sbConnected)pullCloudQueueSilent()},90000);
   renderSyncMeta();
 });
+async function pullCloudQueueSilent(){try{
+  const {data}=await sb.from('user_approvals').select('user_name,role,status').eq('status','pending');
+  if(!data)return;const users=getUsers();let changed=false;
+  data.forEach(r=>{if(!users[r.user_name]){users[r.user_name]={role:r.role||'user',status:'pending',created:new Date().toISOString(),failed:0,lockUntil:0,cloudOnly:true,salt:'',iter:PBKDF2_ITER,hash:''};changed=true}});
+  if(changed){setUsers(users);refreshAdminList();toast('🔔 New cloud registration pending')}
+}catch{}
