@@ -20,14 +20,20 @@
 
 <!-- AUTH OVERLAY -->
 <div id="authOverlay" class="auth-overlay">
+  <div id="moneyRain" class="money-rain" aria-hidden="true"></div>
   <div class="auth-card">
     <img src="./favicon.svg" alt="JOSH" class="auth-logo" width="64" height="64" />
     <h1>JOSH Finance</h1>
-    <p class="hint">Private per-user vault. PBKDF2-hashed passwords, lockout protection & expiring sessions.<br>Use the same login on pages.dev to sync via Supabase.</p>
-    <p id="setupHint" class="hint" style="border:1px dashed var(--gold);border-radius:10px;padding:8px 10px"></p>
-    <label for="authUser">Username <span class="req">a–z 0–9 _ · 3–20 chars</span></label><input id="authUser" placeholder="e.g. josh" autocomplete="username" maxlength="20" />
-    <label for="authPass">Password <button id="showPass" type="button" class="linklike">show</button></label>
-    <input id="authPass" type="password" placeholder="min 8 chars, mix of cases/numbers/symbols" autocomplete="current-password" />
+    <div class="ticker" aria-hidden="true"><div class="ticker-track" id="tickerTrack"></div></div>
+    <label for="authUser">Username <span class="req">a–z 0–9 _ · 3–20 chars</span></label><input id="authUser" placeholder="e.g. kudi_king7" autocomplete="username" maxlength="20" />
+    <label for="authPass">Password</label>
+    <div class="pw-wrap">
+      <input id="authPass" type="password" placeholder="min 8 chars, mix of cases/numbers/symbols" autocomplete="current-password" />
+      <button id="showPass" type="button" class="eye" aria-label="Show password">
+        <svg id="eyeOpen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        <svg id="eyeShut" class="hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+      </button>
+    </div>
     <div id="pwStrength" class="pw-meter"><i></i></div>
     <small id="pwHint" class="hint"></small>
     <div class="auth-row">
@@ -36,7 +42,6 @@
     </div>
     <button id="guestBtn" class="ghost full">Continue as guest (local only)</button>
     <p id="authMsg" class="hint" role="alert"></p>
-    <p class="hint tiny">New here? Register → <b>waiting for admin approval</b>. Your request stays saved until superadmin approves or rejects. Further logins show “approval pending”.<br>Sessions expire after 12h • 5 wrong tries = 5-min lock • secrets never enter git.</p>
   </div>
 </div>
 

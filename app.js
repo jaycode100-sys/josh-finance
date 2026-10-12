@@ -44,6 +44,33 @@ function fmtSubNGN(n){
   return fmtNGN(n);
 }
 function esc(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+// ---------- spicy login: floating money + finance ticker ----------
+function buildMoneyRain(){
+  const box=$('moneyRain');if(!box||box.childElementCount)return;
+  const syms=['₦','$','€','£','¥','₹','₿','¢'];
+  const cols=['#f5d67b','#7dffb0','#93c5fd','#ffffff'];
+  for(let i=0;i<16;i++){
+    const s=document.createElement('span');
+    s.textContent=syms[i%syms.length];
+    s.style.left=(Math.random()*100)+'%';
+    s.style.fontSize=(16+Math.random()*30)+'px';
+    s.style.color=cols[i%cols.length];
+    s.style.animationDuration=(9+Math.random()*10)+'s';
+    s.style.animationDelay=(-Math.random()*14)+'s';
+    box.appendChild(s);
+  }
+}
+function buildTicker(){
+  const t=$('tickerTrack');if(!t||t.dataset.built)return;t.dataset.built='1';
+  const base=`JOSH FINANCE ◆ TRACK ₦ ◆ SAVE % ◆ FORECAST ₦/$ ◆ BEAT DEFICIT ◆ INVEST ₦ ◆ ₦ LIVE: <b id="tickFx">…</b> ◆ `;
+  t.innerHTML=base+base; // doubled for seamless loop
+}
+function updateTicker(){
+  const el=$('tickFx');if(!el||!state)return;
+  const h=[...state.fxHistory].sort((a,b)=>a.date.localeCompare(b.date));
+  const chg=h.length>1?(h[h.length-1].rate-h[h.length-2].rate):0;
+  el.textContent=`₦${Math.round(fx()).toLocaleString()}/$1 ${chg>=0?'+':''}${chg.toFixed(2)}`;
+}
 
 // ---------- hardened auth (PBKDF2 + salt + lockout + expiring session) ----------
 function getUsers(){try{return JSON.parse(localStorage.getItem(USERS_KEY))||{}}catch{return{}}}
@@ -117,7 +144,7 @@ async function doRegister(){
     users[u]=rec; setUsers(users);
     mirrorApprovalToCloud(u,rec);
     if(rec.status==='pending'){
-      $('authMsg').textContent='Registered ✓ — waiting for admin approval. It stays saved until josh approves. Further logins will show “approval pending”.';
+      $('authMsg').textContent='Register → waiting for admin approval. Your request stays saved until superadmin approves.';
       toast('Waiting for admin approval ⏳');
       // nudge superadmin on this device
       try{localStorage.setItem('joshPendingPing',JSON.stringify({u,at:new Date().toISOString()}))}catch{}
@@ -322,6 +349,7 @@ function renderFX(){
   $('fxLiveDot').classList.remove('off');
   $('fxMeta').textContent='Updated '+(state.settings.fxUpdatedAt||'').slice(0,16)+' UTC';
   $('fxSource').textContent='Source: '+state.settings.fxSource+' • Auto-refreshes daily • Trend shows 2026 history + live';
+  try{updateTicker()}catch{}
   if(window.Chart){
     if(charts.fx)charts.fx.destroy();
     charts.fx=new Chart($('fxChart'),{type:'line',data:{labels:shown.map(p=>p.date.slice(5)),datasets:[{label:'₦ per $1',data:shown.map(p=>p.rate),borderColor:'#10b981',fill:true,backgroundColor:'#10b98122',tension:.3,pointRadius:2}]},options:{plugins:{legend:{labels:{color:'#cfd8ff'}}},scales:{x:{ticks:{color:'#9aa7cc',maxTicksLimit:8}},y:{ticks:{color:'#9aa7cc'}}}}});
@@ -510,7 +538,19 @@ function generatePDF(){
 // ---------- init ----------
 document.addEventListener('DOMContentLoaded',()=>{
   $('authPass').addEventListener('input',updatePwMeter);
-  $('showPass').onclick=()=>{const p=$('authPass');p.type=p.type==='password'?'text':'password';$('showPass').textContent=p.type==='password'?'show':'hide'};
+  $('showPass').onclick=()=>{
+    const p=$('authPass'),show=p.type==='password';
+    p.type=show?'text':'password';
+    $('eyeOpen').classList.toggle('hidden',show);
+    $('eyeShut').classList.toggle('hidden',!show);
+    $('showPass').setAttribute('aria-label',show?'Hide password':'Show password');
+  };
+  // random sample username as placeholder (changes every load)
+  try{
+    const handles=['kudi_king7','naira_ninja','vault_fox42','kobo_queen','ledger_lion','sapa_no_more','money_maven','zafin_up','cowry_collector','mint_master9'];
+    $('authUser').placeholder='e.g. '+handles[Math.floor(Math.random()*handles.length)];
+  }catch{}
+  buildMoneyRain();buildTicker();
   // bind auth actions FIRST so login/register/guest can never be blocked by later init errors
   $('loginBtn').onclick=doLogin;$('registerBtn').onclick=doRegister;
   $('guestBtn').onclick=()=>loginAs('guest');
