@@ -210,9 +210,10 @@ function decideUser(u,status){
   toast(u+' → '+status+(status==='approved'?' ✓':' ✕'));
 }
 function setupHint(){
+  const el=$('setupHint');if(!el)return;
   const users=getUsers();
   const hasSuper=Object.values(users).some(r=>r.role==='superadmin');
-  $('setupHint').innerHTML=hasSuper
+  el.innerHTML=hasSuper
     ? `Superadmin seat taken 👑. New users: Register → <b>waiting for admin approval</b>. josh approves in 👑 dashboard (🔔 bell).`
     : `First run: create the permanent superadmin — type <b>josh</b> + your password and click <b>Register</b>. That seat locks forever; everyone else queues for approval.`;
 }
@@ -510,14 +511,15 @@ function generatePDF(){
 document.addEventListener('DOMContentLoaded',()=>{
   $('authPass').addEventListener('input',updatePwMeter);
   $('showPass').onclick=()=>{const p=$('authPass');p.type=p.type==='password'?'text':'password';$('showPass').textContent=p.type==='password'?'show':'hide'};
-  setupHint();
-  const sess=getSession();
-  if(sess){currentUser=sess.u;state=loadUser(sess.u)||seedForUser();$('authOverlay').classList.add('hidden');$('userBadge').textContent=sess.u;$('syncUser').textContent=sess.u;$('roleBadge').textContent=(getUsers()[sess.u]?.role==='superadmin'?'👑 superadmin':'user');$('sessInfo').textContent=sessLeft()}
+  // bind auth actions FIRST so login/register/guest can never be blocked by later init errors
   $('loginBtn').onclick=doLogin;$('registerBtn').onclick=doRegister;
   $('guestBtn').onclick=()=>loginAs('guest');
   $('authPass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
   $('authUser').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
   $('logoutBtn').onclick=()=>{localStorage.removeItem(SESSION_KEY);location.reload()};
+  try{setupHint()}catch(e){console.warn('setupHint',e)}
+  const sess=getSession();
+  if(sess){try{currentUser=sess.u;state=loadUser(sess.u)||seedForUser();$('authOverlay').classList.add('hidden');$('userBadge').textContent=sess.u;$('syncUser').textContent=sess.u;$('roleBadge').textContent=(getUsers()[sess.u]?.role==='superadmin'?'👑 superadmin':'user');$('sessInfo').textContent=sessLeft()}catch(e){console.warn('session restore',e)}}
   if(state){fillSettings();setTxType('expense');renderBudgets();initSupabaseFromStore();renderAdmin();render();fetchLiveFX()}
   $('adminRefresh').onclick=()=>{refreshAdminList();toast('Queue refreshed')};
   $('adminPullCloud').onclick=pullCloudQueue;
@@ -561,4 +563,4 @@ async function pullCloudQueueSilent(){try{
   if(!data)return;const users=getUsers();let changed=false;
   data.forEach(r=>{if(!users[r.user_name]){users[r.user_name]={role:r.role||'user',status:'pending',created:new Date().toISOString(),failed:0,lockUntil:0,cloudOnly:true,salt:'',iter:PBKDF2_ITER,hash:''};changed=true}});
   if(changed){setUsers(users);refreshAdminList();toast('🔔 New cloud registration pending')}
-}catch{}
+}catch{}}
