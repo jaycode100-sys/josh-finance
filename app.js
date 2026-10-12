@@ -207,7 +207,7 @@ async function cloudLogin(u,p){
 }
 // Resume a Supabase login on any device + connect silently at boot
 async function restoreCloudSession(){
-  try{initSupabaseFromStore()}catch{}
+  try{await initSupabaseFromStore()}catch{}
   if(!sb||!sbConnected||currentUser) return;
   try{
     const {data:{session}}=await sb.auth.getSession();
@@ -371,20 +371,39 @@ function getSbConfig(){
 }
 function initSupabaseFromStore(){
   const c=getSbConfig();
-  if(c){$('sbUrl').value=c.url;$('sbKey').value=c.key;connectSupabase(true)}
+  if(c){$('sbUrl').value=c.url;$('sbKey').value=c.key;return connectSupabase(true)}
 }
-function connectSupabase(silent){
+function updateCloudBadge(){
+  const b=$('cloudBadge');if(!b)return;
+  b.textContent=sbConnected?'● cloud':'○ local';
+  b.classList.toggle('on',!!sbConnected);
+}
+function sbUrlLooksRight(url){return /^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/i.test(url||'')}
+async function connectSupabase(silent){
   const url=$('sbUrl').value.trim(),key=$('sbKey').value.trim();
+  sbConnected=false;updateCloudBadge();
   if(!url||!key){if(!silent)$('sbStatus').textContent='Paste Supabase URL + anon key first.';return}
+  if(!sbUrlLooksRight(url)){
+    if(!silent){$('sbStatus').textContent='That URL looks wrong — use your Project URL like https://xyzcompany.supabase.co (Supabase → Project Settings → Data API). “https://supabase.com” is just the homepage.';toast('Check Supabase URL ⚠')}
+    return;
+  }
   if(!window.supabase){$('sbStatus').textContent='Supabase SDK failed to load (offline?).';return}
+  if(!silent)$('sbStatus').textContent='Verifying…';
   try{
     sb=window.supabase.createClient(url,key);
+    // real reachability check — creating a client alone proves nothing
+    const {error}=await sb.from('finance_states').select('user_name').limit(1);
+    if(error && /fetch|network|load failed|failed to/i.test(error.message)) throw new Error('unreachable');
+    // table-missing errors still mean the server answered — that's a pass (run supabase.sql next)
     localStorage.setItem(SB_CFG_KEY,JSON.stringify({url,key}));
-    sbConnected=true;
+    sbConnected=true;updateCloudBadge();
     $('sbStatus').textContent='Connected ✓ — Push/Pull enabled (table: finance_states).';
-    $('cloudBadge').textContent='● cloud';$('cloudBadge').classList.add('on');
     if(!silent)toast('Supabase connected ✓');
-  }catch(e){$('sbStatus').textContent='Connect failed: '+e.message}
+  }catch(e){
+    sbConnected=false;updateCloudBadge();
+    $('sbStatus').textContent='Can’t reach that Supabase project — check the URL/key (Project Settings → Data API) and your connection, then retry.';
+    if(!silent)toast('Supabase unreachable ⚠');
+  }
 }
 async function sbPush(){
   if(!sb||!sbConnected) return $('sbStatus').textContent='Connect Supabase first.';
