@@ -7,7 +7,9 @@ const PBKDF2_ITER = 210000; // OWASP 2023 minimum for PBKDF2-HMAC-SHA-256
 const SUPERADMIN = 'josh'; // the one and only superadmin username
 // Cloud auth: every username gets a real Supabase Auth account (bcrypt server-side,
 // works from any browser/device). Passwords NEVER touch our tables — only Auth holds them.
-const AUTH_DOMAIN = 'josh.local';
+// NOTE: Supabase rejects special-use domains like .local — so we use a real-suffix domain
+// (no mail is ever sent; Confirm-email must stay OFF).
+const AUTH_DOMAIN = 'joshfinance.app';
 const unameToEmail = u => u + '@' + AUTH_DOMAIN;
 const emailToUname = e => String(e||'').split('@')[0];
 const SB_CFG_KEY = 'joshSbConfig';
@@ -142,9 +144,21 @@ async function cloudSuperadminTaken(){
   try{const {data}=await sb.from('user_approvals').select('user_name').eq('role','superadmin').limit(1);return !!(data&&data.length)}catch{return false}
 }
 function mirrorLocalStub(u,role,status){
-  const users=getUsers();
-  users[u]={cloud:true,role,status,created:users[u]?.created||new Date().toISOString(),failed:0,lockUntil:0,salt:'',iter:PBKDF2_ITER,hash:''};
+  const users=getUsers(), prev=users[u]||{};
+  users[u]={cloud:true,role,status,created:prev.created||new Date().toISOString(),failed:0,lockUntil:0,
+    salt:prev.salt||'',iter:prev.iter||PBKDF2_ITER,hash:prev.hash||''};
   setUsers(users);
+}
+// One-time safety net: after any successful cloud auth on THIS browser, cache a local
+// verifier — so login keeps working here even if Supabase/Cloudflare are unreachable later.
+async function cacheLocalVerifier(u,p,role,status){
+  try{
+    const users=getUsers(), prev=users[u]||{};
+    const salt=b64e(crypto.getRandomValues(new Uint8Array(16)));
+    users[u]={cloud:true,role,status,created:prev.created||new Date().toISOString(),failed:0,lockUntil:0,
+      salt,iter:PBKDF2_ITER,hash:await pbkdf2Hex(p,salt,PBKDF2_ITER)};
+    setUsers(users);
+  }catch{}
 }
 function netFail(msg){return /failed to fetch|network|load failed|fetch/i.test(msg||'')}
 function showApprovalModal(u){
@@ -183,26 +197,32 @@ async function cloudRegister(u,p){
     return;
   }
   $('authMsg').textContent='Superadmin created — welcome, josh 👑';
+  await cacheLocalVerifier(u,p,role,status); // one-time safety net for this browser
   loginAs(u);sbPullSilent();
 }
 async function cloudLogin(u,p){
-  const row=await cloudRoleRow(u);
+  let row=null;
+  try{ row=await cloudRoleRow(u); }
+  catch{ return await localLogin(u,p); } // Supabase unreachable → this browser's saved login
   if(!row){
-    if(!navigator.onLine) return $('authMsg').textContent='You’re offline — connect to the internet to log in.';
+    if(!navigator.onLine) return await localLogin(u,p);
     return $('authMsg').textContent='No such user — Register first.';
   }
   if(row.status==='pending'){showApprovalModal(u);return $('authMsg').textContent='Approval pending — account yet to be approved by superadmin.'}
   if(row.status==='rejected') return $('authMsg').textContent='Account rejected — contact superadmin (josh).';
-  const {error}=await sb.auth.signInWithPassword({email:unameToEmail(u),password:p});
+  let error=null;
+  try{ ({error}=await sb.auth.signInWithPassword({email:unameToEmail(u),password:p})); }
+  catch(e){ return await localLogin(u,p); } // Supabase unreachable → saved login
   $('authPass').value='';
   if(error){
-    if(netFail(error.message)) return $('authMsg').textContent='Can’t reach Supabase — check your connection and the URL/key in Sync settings, then retry.';
+    if(netFail(error.message)) return await localLogin(u,p); // outage → saved login
     if(/email not confirmed/i.test(error.message))
       return $('authMsg').textContent='Supabase still requires email confirmation — ask josh to turn OFF “Confirm email” (Auth → Sign In/Up).';
     if(/invalid login credentials/i.test(error.message)) return $('authMsg').textContent='Wrong password — try again.';
     return $('authMsg').textContent='Login failed: '+error.message;
   }
   mirrorLocalStub(u,row.role,'approved');
+  await cacheLocalVerifier(u,p,row.role,'approved'); // keep this browser working even if cloud dies later
   loginAs(u);sbPullSilent();
 }
 // Resume a Supabase login on any device + connect silently at boot
@@ -278,8 +298,11 @@ async function doLogin(){
     if(!validUser(u)&&u!=='guest') return $('authMsg').textContent='Invalid username format.';
     if(u==='guest'){loginAs('guest');return}
     if(u==='admin'&&p==='admin'){loginAs('admin');return} // discreet local backdoor: no privileges, no cloud, no session persistence
-    if(sb&&sbConnected) return await cloudLogin(u,p); // global auth — any device, anywhere
-    const users=getUsers(),rec=users[u];
+    if(sb&&sbConnected&&navigator.onLine!==false) return await cloudLogin(u,p); // global auth — any device, anywhere
+    return await localLogin(u,p); // offline / unreachable / local mode: this browser's saved login
+  }finally{btn.disabled=false}
+}
+async function localLogin(u,p){
     if(rec&&rec.cloudOnly&&!rec.hash){
       // stub synced from another device — password never leaves that device by design
       if(rec.status==='pending') return $('authMsg').textContent='Approval pending — registered on another device, waiting for superadmin.';
@@ -289,8 +312,9 @@ async function doLogin(){
     if(!rec){
       // maybe registered on another device and pending in cloud?
       const cloud=await fetchCloudApproval(u);
-      if(cloud==='pending') return $('authMsg').textContent='Approval pending — account yet to be approved by superadmin.';
+      if(cloud==='pending'){showApprovalModal(u);return $('authMsg').textContent='Approval pending — account yet to be approved by superadmin.'}
       if(cloud==='rejected') return $('authMsg').textContent='Account rejected — contact superadmin (josh).';
+      if(navigator.onLine===false) return $('authMsg').textContent='You’re offline and this browser has no saved login for that name — log in once while online to enable offline access.';
       return $('authMsg').textContent='No such user — Register first.';
     }
     if(rec.lockUntil&&rec.lockUntil>Date.now()){
@@ -311,7 +335,6 @@ async function doLogin(){
     if(st==='rejected') return $('authMsg').textContent='Account rejected — contact superadmin (josh).';
     rec.failed=0;rec.lockUntil=0;setUsers(users);
     loginAs(u);
-  }finally{btn.disabled=false}
 }
 function isSuperadmin(){try{return (getUsers()[currentUser]?.role==='superadmin')}catch{return false}}
 function pendingUsers(){return Object.entries(getUsers()).filter(([u,r])=>r.status==='pending').map(([u,r])=>({u,r})).sort((a,b)=>a.r.created.localeCompare(b.r.created))}
