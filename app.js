@@ -181,7 +181,7 @@ async function cloudRegister(u,p){
   $('authPass').value='';
   if(error){
     if(netFail(error.message)) return $('authMsg').textContent='Can’t reach Supabase — check your connection and the URL/key in Sync settings, then retry.';
-    if(/rate limit|over_email_send/i.test(error.message)) return $('authMsg').textContent='Signup paused by Supabase (rate limit, ~1 hour). Shortcut: josh can create the user directly in Dashboard → Authentication → Users → Add user.';
+    if(/rate limit|over_email_send/i.test(error.message)) return $('authMsg').textContent='Signup paused by Supabase (rate limit, ~1 hour).';
     if(/already registered|already exists/i.test(error.message)){
       const r2=await cloudRoleRow(u);
       if(r2?.status==='pending'){showApprovalModal(u);return $('authMsg').textContent='Approval pending — waiting for admin approval.'}
