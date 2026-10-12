@@ -40,8 +40,17 @@
       <button id="loginBtn" class="primary">Login</button>
       <button id="registerBtn" class="ghost">Register</button>
     </div>
-    <button id="guestBtn" class="ghost full">Continue as guest (local only)</button>
     <p id="authMsg" class="hint" role="alert"></p>
+  </div>
+  <!-- APPROVAL POPUP -->
+  <div id="approvalModal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="hourglass">⏳</div>
+      <h2>Waiting for admin approval</h2>
+      <p>Hi <b id="approvalUser">—</b>, your request is saved.</p>
+      <p class="hint">Superadmin <b>josh</b> has been notified. You’ll be able to log in once approved — until then, further attempts will show “approval pending”.</p>
+      <button id="approvalOk" class="primary">OK, I'll wait</button>
+    </div>
   </div>
 </div>
 

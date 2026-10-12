@@ -146,6 +146,12 @@ function mirrorLocalStub(u,role,status){
   users[u]={cloud:true,role,status,created:users[u]?.created||new Date().toISOString(),failed:0,lockUntil:0,salt:'',iter:PBKDF2_ITER,hash:''};
   setUsers(users);
 }
+function netFail(msg){return /failed to fetch|network|load failed|fetch/i.test(msg||'')}
+function showApprovalModal(u){
+  $('approvalUser').textContent=u;
+  $('approvalModal').classList.remove('hidden');
+}
+function hideApprovalModal(){$('approvalModal').classList.add('hidden')}
 async function cloudRegister(u,p){
   const row=await cloudRoleRow(u);
   if(row){
@@ -160,9 +166,10 @@ async function cloudRegister(u,p){
   const {error}=await sb.auth.signUp({email:unameToEmail(u),password:p});
   $('authPass').value='';
   if(error){
+    if(netFail(error.message)) return $('authMsg').textContent='Can’t reach Supabase — check your connection and the URL/key in Sync settings, then retry.';
     if(/already registered|already exists/i.test(error.message)){
       const r2=await cloudRoleRow(u);
-      if(r2?.status==='pending') return $('authMsg').textContent='Approval pending — waiting for admin approval.';
+      if(r2?.status==='pending'){showApprovalModal(u);return $('authMsg').textContent='Approval pending — waiting for admin approval.'}
       return $('authMsg').textContent='Username taken — try Login.';
     }
     return $('authMsg').textContent='Register failed: '+error.message;
@@ -172,7 +179,7 @@ async function cloudRegister(u,p){
   if(status==='pending'){
     await sb.auth.signOut(); // pending users stay out until approved
     $('authMsg').textContent='Register → waiting for admin approval. Your request stays saved until superadmin approves.';
-    toast('Waiting for admin approval ⏳');
+    showApprovalModal(u);
     return;
   }
   $('authMsg').textContent='Superadmin created — welcome, josh 👑';
@@ -180,12 +187,16 @@ async function cloudRegister(u,p){
 }
 async function cloudLogin(u,p){
   const row=await cloudRoleRow(u);
-  if(!row) return $('authMsg').textContent='No such user — Register first.';
-  if(row.status==='pending') return $('authMsg').textContent='Approval pending — account yet to be approved by superadmin.';
+  if(!row){
+    if(!navigator.onLine) return $('authMsg').textContent='You’re offline — connect to the internet to log in.';
+    return $('authMsg').textContent='No such user — Register first.';
+  }
+  if(row.status==='pending'){showApprovalModal(u);return $('authMsg').textContent='Approval pending — account yet to be approved by superadmin.'}
   if(row.status==='rejected') return $('authMsg').textContent='Account rejected — contact superadmin (josh).';
   const {error}=await sb.auth.signInWithPassword({email:unameToEmail(u),password:p});
   $('authPass').value='';
   if(error){
+    if(netFail(error.message)) return $('authMsg').textContent='Can’t reach Supabase — check your connection and the URL/key in Sync settings, then retry.';
     if(/email not confirmed/i.test(error.message))
       return $('authMsg').textContent='Supabase still requires email confirmation — ask josh to turn OFF “Confirm email” (Auth → Sign In/Up).';
     if(/invalid login credentials/i.test(error.message)) return $('authMsg').textContent='Wrong password — try again.';
@@ -251,7 +262,7 @@ async function localRegister(u,p){
     mirrorApprovalToCloud(u,rec);
     if(rec.status==='pending'){
       $('authMsg').textContent='Register → waiting for admin approval. Your request stays saved until superadmin approves.';
-      toast('Waiting for admin approval ⏳');
+      showApprovalModal(u);
       // nudge superadmin on this device
       try{localStorage.setItem('joshPendingPing',JSON.stringify({u,at:new Date().toISOString()}))}catch{}
       return;
@@ -295,7 +306,7 @@ async function doLogin(){
     }
     // password correct — now gate on approval (never reveal pending state on wrong password)
     const st=rec.status||'approved';
-    if(st==='pending') return $('authMsg').textContent='Approval pending — account yet to be approved by superadmin.';
+    if(st==='pending'){showApprovalModal(u);return $('authMsg').textContent='Approval pending — account yet to be approved by superadmin.'}
     if(st==='rejected') return $('authMsg').textContent='Account rejected — contact superadmin (josh).';
     rec.failed=0;rec.lockUntil=0;setUsers(users);
     loginAs(u);
@@ -657,9 +668,9 @@ document.addEventListener('DOMContentLoaded',()=>{
     $('authUser').placeholder='e.g. '+handles[Math.floor(Math.random()*handles.length)];
   }catch{}
   buildMoneyRain();buildTicker();
-  // bind auth actions FIRST so login/register/guest can never be blocked by later init errors
+  // bind auth actions FIRST so login/register can never be blocked by later init errors
   $('loginBtn').onclick=doLogin;$('registerBtn').onclick=doRegister;
-  $('guestBtn').onclick=()=>loginAs('guest');
+  $('approvalOk').onclick=hideApprovalModal;
   $('authPass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
   $('authUser').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
   $('logoutBtn').onclick=async()=>{try{await sb?.auth.signOut()}catch{};localStorage.removeItem(SESSION_KEY);location.reload()};

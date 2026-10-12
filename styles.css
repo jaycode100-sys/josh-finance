@@ -117,6 +117,14 @@ table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px 10px;
 .approve{background:linear-gradient(135deg,var(--emerald),#0a6e4e);border:0;color:#fff;font-weight:800;border-radius:9px;padding:6px 12px;cursor:pointer}
 .reject{background:linear-gradient(135deg,#ef4444,#991b1b);border:0;color:#fff;font-weight:800;border-radius:9px;padding:6px 12px;cursor:pointer}
 .approve:hover,.reject:hover{filter:brightness(1.12)}
+/* approval popup */
+.modal-overlay{position:absolute;inset:0;display:grid;place-items:center;background:#04061acc;backdrop-filter:blur(3px);z-index:5;padding:16px}
+.modal-overlay.hidden{display:none!important}
+.modal-card{width:330px;max-width:100%;text-align:center;background:linear-gradient(180deg,#1a2560,#0d1738);border:1px solid var(--gold);border-radius:18px;padding:26px 22px;box-shadow:0 24px 60px #000d;animation:cardIn .4s cubic-bezier(.2,.9,.3,1.2)}
+.modal-card h2{margin:8px 0 6px;font-size:19px;color:var(--gold-2)}
+.modal-card p{margin:6px 0;font-size:14px}
+.hourglass{font-size:44px;animation:sway 2.2s ease-in-out infinite}
+@keyframes sway{0%,100%{transform:rotate(-10deg)}50%{transform:rotate(10deg)}}
 .fx-card .fx-big{display:flex;align-items:baseline;gap:10px}.fx-big strong{font-size:24px;color:var(--gold-2)}.fx-big span{font-size:12px;font-weight:700}
 .fx-controls{display:flex;gap:8px;align-items:end;margin:8px 0}.fx-controls select{width:150px}.manual{flex:1}
 .sync-btns{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
