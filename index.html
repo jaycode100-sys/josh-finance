@@ -117,44 +117,6 @@
       <h2>Budget guardrails (₦/mo)</h2>
       <div id="budgetList"></div>
     </section>
-
-    <section class="card small" id="syncCard">
-      <h2>⇅ Login / Sync & Backup</h2>
-      <p class="hint">Logged in as <b id="syncUser">—</b> <span id="sessInfo" class="hint"></span>. Data auto-saves per user. Use backup to move devices.</p>
-      <div class="sync-btns">
-        <button id="exportBtn" class="ghost sm">Export CSV</button>
-        <button id="backupBtn" class="ghost sm">⬇ Backup JSON</button>
-        <label class="ghost sm import">⬆ Restore<input id="restoreFile" type="file" accept=".json" hidden /></label>
-      </div>
-      <label>Sync code (copy to other device)</label>
-      <div class="sync-code"><button id="copySync" class="ghost sm">Copy code</button><button id="pasteSync" class="ghost sm">Paste & restore</button></div>
-      <textarea id="syncArea" rows="2" placeholder="sync code appears here…"></textarea>
-      <h3 class="gold-h">◆ Supabase cloud (for pages.dev hosting)</h3>
-      <div class="grid2">
-        <div><label>Supabase URL</label><input id="sbUrl" placeholder="https://xyz.supabase.co" /></div>
-        <div><label>Supabase anon key</label><input id="sbKey" type="password" placeholder="eyJ…" /></div>
-      </div>
-      <div class="sync-btns">
-        <button id="sbConnect" class="primary sm">Connect</button>
-        <button id="sbPush" class="ghost sm gold">☁ Push to cloud</button>
-        <button id="sbPull" class="ghost sm gold">☁ Pull from cloud</button>
-      </div>
-      <small id="sbStatus" class="hint">Not connected — local mode. See README-DEPLOY.md.</small><br>
-      <small id="syncMeta" class="hint"></small><br>
-      <button id="resetBtn" class="ghost danger sm">Reset month data</button>
-    </section>
-
-    <section class="card small hidden" id="adminCard">
-      <h2>👑 Superadmin — approvals <span id="adminPendingPill" class="pill">0 pending</span></h2>
-      <p class="hint">Only <b>josh</b> sees this. New registrations stay <b>pending forever</b> until you approve or reject. They cannot log in before approval.</p>
-      <div class="sync-btns">
-        <button id="adminRefresh" class="ghost sm">↻ Refresh queue</button>
-        <button id="adminPullCloud" class="ghost sm gold">☁ Pull cloud queue</button>
-      </div>
-      <div id="approvalList" class="breakdown"></div>
-      <h3 class="gold-h">All users</h3>
-      <div id="userList" class="breakdown"></div>
-    </section>
   </aside>
 
   <section class="maincol">
@@ -188,11 +150,65 @@
         <p id="promoMsg" class="advice"></p></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="txCard">
       <h2>Transactions <span id="txCount"></span> <button id="pdfBtn2" class="ghost sm">📄 PDF for this month</button></h2>
       <div class="tx-tools"><input id="txSearch" placeholder="Search…" /><select id="txFilter"><option value="all">All</option><option value="expense">Expenses</option><option value="income">Income</option></select>
       <label class="import">Import CSV<input id="importCsv" type="file" accept=".csv" hidden /></label></div>
       <div class="table-wrap"><table id="txTable"><thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Note</th><th style="text-align:right">₦ / $</th><th></th></tr></thead><tbody></tbody></table></div>
+    </div>
+
+    <div class="card wide" id="syncCard">
+      <h2>⇅ Login / Sync & Backup <span class="hint">— fills the space under Transactions · <a href="#syncCard" class="linklike">link #sync</a></span></h2>
+      <p class="hint">Logged in as <b id="syncUser">—</b> <span id="sessInfo" class="hint"></span>. Data auto-saves per user. Use backup to move devices.</p>
+      <div class="sync-grid">
+        <div class="sync-col">
+          <h3 class="gold-h">① File backup</h3>
+          <div class="sync-btns">
+            <button id="exportBtn" class="ghost sm">Export CSV</button>
+            <button id="backupBtn" class="ghost sm">⬇ Backup JSON</button>
+            <label class="ghost sm import">⬆ Restore<input id="restoreFile" type="file" accept=".json" hidden /></label>
+          </div>
+          <small id="syncMeta" class="hint"></small><br>
+          <button id="resetBtn" class="ghost danger sm">Reset month data</button>
+        </div>
+        <div class="sync-col">
+          <h3 class="gold-h">② Sync code</h3>
+          <label>Copy to other device</label>
+          <div class="sync-code"><button id="copySync" class="ghost sm">Copy code</button><button id="pasteSync" class="ghost sm">Paste & restore</button></div>
+          <textarea id="syncArea" rows="4" placeholder="sync code appears here…"></textarea>
+        </div>
+        <div class="sync-col">
+          <h3 class="gold-h">◆ Supabase cloud</h3>
+          <div class="grid2">
+            <div><label>Supabase URL</label><input id="sbUrl" placeholder="https://xyz.supabase.co" /></div>
+            <div><label>Supabase anon key</label><input id="sbKey" type="password" placeholder="eyJ…" /></div>
+          </div>
+          <div class="sync-btns">
+            <button id="sbConnect" class="primary sm">Connect</button>
+            <button id="sbPush" class="ghost sm gold">☁ Push</button>
+            <button id="sbPull" class="ghost sm gold">☁ Pull</button>
+          </div>
+          <small id="sbStatus" class="hint">Not connected — local mode. See README-DEPLOY.md.</small>
+        </div>
+      </div>
+    </div>
+
+    <div class="card wide hidden" id="adminCard">
+      <h2>👑 Superadmin — approvals <span id="adminPendingPill" class="pill">0 pending</span></h2>
+      <p class="hint">Only <b>josh</b> sees this. New registrations stay <b>pending forever</b> until you approve or reject.</p>
+      <div class="sync-grid">
+        <div class="sync-col">
+          <div class="sync-btns">
+            <button id="adminRefresh" class="ghost sm">↻ Refresh queue</button>
+            <button id="adminPullCloud" class="ghost sm gold">☁ Pull cloud queue</button>
+          </div>
+          <div id="approvalList" class="breakdown"></div>
+        </div>
+        <div class="sync-col">
+          <h3 class="gold-h">All users</h3>
+          <div id="userList" class="breakdown"></div>
+        </div>
+      </div>
     </div>
   </section>
 </main>
