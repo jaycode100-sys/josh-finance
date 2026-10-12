@@ -3,21 +3,25 @@
 Static site (no build). Folder `JOSH/` is the site root.
 
 ## 0. First run — permanent superadmin (no secret in git)
-1. Open the app → username `josh` → a strong password (min 12 chars, mixed) → **Register**.
-2. First-ever `josh` becomes **👑 superadmin, approved forever**. The seat then locks — no one else can claim it.
-3. The password is hashed (PBKDF2-SHA256, 210k iterations, 16-byte salt) and the field is wiped. **The repo never contains any password.**
+1. Connect Supabase first (section 2) — cloud mode gives worldwide logins.
+2. Open the app → username `josh` → a strong password (min 12 chars, mixed) → **Register**.
+3. First-ever `josh` becomes **👑 superadmin, approved forever**. The seat then locks — no one else can claim it.
+4. Passwords go to Supabase Auth over HTTPS (bcrypt server-side). **The repo never contains any password.**
 
-## 1. Approvals — how users join
-- Anyone else: Register → sees **“waiting for admin approval”**. Record stays **pending forever** until decided.
+## 1. Worldwide logins — how it works
+- Every username owns a real Supabase Auth account (`username@josh.local`); passwords are verified by Supabase, so **Login works from any browser, any device, anywhere**.
+- Anyone else: Register → sees **“waiting for admin approval”**. Record stays **pending forever** until decided; pending users are signed straight back out and cannot get in.
 - Further Login/Register attempts show **“approval pending”** / **“account yet to be approved”**.
 - Superadmin `josh`: topbar 🔔 bell + 👑 dashboard lists queue (Approve/Reject), full user list with status pills. Polls local + Supabase cloud every 90s.
-- Cloud mirror holds **status/role only** (`user_approvals`) — never passwords/salts/hashes, which stay on each device. A user approved in cloud still Registers once per new device to set that device's password (by design).
+- Finance auto-syncs: every save pushes to cloud (debounced 5s); every login pulls. No more copy/paste codes needed.
+- Offline / not connected: app falls back to this-browser-only local accounts (PBKDF2).
 
 ## 2. Supabase setup
 1. supabase.com → New project → SQL Editor → Run `supabase.sql`, then `supabase-approval.sql`.
-2. Project Settings → API → copy URL + `anon` key (never `service_role` in frontend).
-3. App → Sync card → paste → **Connect** → **Push to cloud** / **Pull cloud queue**.
-4. `supabase-config.js` stays placeholders in git — configure at runtime (localStorage), not in the repo.
+2. **Auth settings (critical, else logins fail):** Authentication → Sign In / Sign Up → turn OFF **“Confirm email”** (accounts use internal `username@josh.local` addresses that can't receive mail) → Save. Leave “Allow new users to sign up” ON.
+3. Project Settings → API → copy URL + `anon` key (never `service_role` in frontend).
+4. App → Sync card → paste → **Connect** → status flips to ● cloud.
+5. `supabase-config.js` stays placeholders in git — configure at runtime (localStorage), not in the repo.
 
 ## 3. GitHub via SSH (recommended over HTTPS)
 - **Why SSH is better:** no tokens in URLs, no expiry pasting, private key never leaves your PC, supports signed commits, per-host keys. HTTPS needs a PAT that can leak in logs/history.

@@ -5,6 +5,11 @@ const SESSION_TTL = 12*3600*1000;
 const MAX_FAIL = 5, LOCK_MS = 5*60*1000;
 const PBKDF2_ITER = 210000; // OWASP 2023 minimum for PBKDF2-HMAC-SHA-256
 const SUPERADMIN = 'josh'; // the one and only superadmin username
+// Cloud auth: every username gets a real Supabase Auth account (bcrypt server-side,
+// works from any browser/device). Passwords NEVER touch our tables — only Auth holds them.
+const AUTH_DOMAIN = 'josh.local';
+const unameToEmail = u => u + '@' + AUTH_DOMAIN;
+const emailToUname = e => String(e||'').split('@')[0];
 const SB_CFG_KEY = 'joshSbConfig';
 const dataKey = u => 'joshFinanceV2_' + u;
 const $ = id => document.getElementById(id);
@@ -114,7 +119,7 @@ function seedForUser(){
   };
 }
 function loadUser(u){try{const s=JSON.parse(localStorage.getItem(dataKey(u)));if(s&&s.settings)return s}catch{}return null}
-function save(){if(!currentUser||currentUser==='guest-local')return localSaveGuest();state.syncMeta.lastSync=new Date().toISOString();localStorage.setItem(dataKey(currentUser),JSON.stringify(state));renderSyncMeta()}
+function save(){if(!currentUser||currentUser==='guest-local')return localSaveGuest();state.syncMeta.lastSync=new Date().toISOString();localStorage.setItem(dataKey(currentUser),JSON.stringify(state));renderSyncMeta();scheduleCloudPush()}
 function localSaveGuest(){try{localStorage.setItem(dataKey('guest'),JSON.stringify(state))}catch{}}
 
 async function doRegister(){
@@ -124,6 +129,107 @@ async function doRegister(){
     if(!validUser(u)) return $('authMsg').textContent='Username: 3–20 chars, lowercase letters/numbers/_ only.';
     if(p.length<8) return $('authMsg').textContent='Password must be at least 8 characters.';
     if(pwScore(p)<2) return $('authMsg').textContent='Password too weak — mix upper/lowercase, numbers and symbols.';
+    if(u==='guest') return $('authMsg').textContent='That name is reserved — pick another.';
+    if(sb&&sbConnected) return await cloudRegister(u,p);
+    return await localRegister(u,p);
+  }finally{btn.disabled=false}
+}
+// ---------- cloud auth (global: any browser, any device, anywhere) ----------
+async function cloudRoleRow(u){
+  try{const {data}=await sb.from('user_approvals').select('role,status').eq('user_name',u).single();return data||null}catch{return null}
+}
+async function cloudSuperadminTaken(){
+  try{const {data}=await sb.from('user_approvals').select('user_name').eq('role','superadmin').limit(1);return !!(data&&data.length)}catch{return false}
+}
+function mirrorLocalStub(u,role,status){
+  const users=getUsers();
+  users[u]={cloud:true,role,status,created:users[u]?.created||new Date().toISOString(),failed:0,lockUntil:0,salt:'',iter:PBKDF2_ITER,hash:''};
+  setUsers(users);
+}
+async function cloudRegister(u,p){
+  const row=await cloudRoleRow(u);
+  if(row){
+    if(row.status==='pending') return $('authMsg').textContent='Approval pending — waiting for admin approval.';
+    if(row.status==='rejected') return $('authMsg').textContent='Account rejected — contact superadmin (josh).';
+    return $('authMsg').textContent='Username taken — try Login.';
+  }
+  if(u===SUPERADMIN && await cloudSuperadminTaken())
+    return $('authMsg').textContent='Reserved superadmin name — contact josh.';
+  const isFirst=(u===SUPERADMIN && !(await cloudSuperadminTaken()));
+  const role=isFirst?'superadmin':'user', status=isFirst?'approved':'pending';
+  const {error}=await sb.auth.signUp({email:unameToEmail(u),password:p});
+  $('authPass').value='';
+  if(error){
+    if(/already registered|already exists/i.test(error.message)){
+      const r2=await cloudRoleRow(u);
+      if(r2?.status==='pending') return $('authMsg').textContent='Approval pending — waiting for admin approval.';
+      return $('authMsg').textContent='Username taken — try Login.';
+    }
+    return $('authMsg').textContent='Register failed: '+error.message;
+  }
+  await sb.from('user_approvals').upsert({user_name:u,role,status,updated_at:new Date().toISOString()},{onConflict:'user_name'});
+  mirrorLocalStub(u,role,status);
+  if(status==='pending'){
+    await sb.auth.signOut(); // pending users stay out until approved
+    $('authMsg').textContent='Register → waiting for admin approval. Your request stays saved until superadmin approves.';
+    toast('Waiting for admin approval ⏳');
+    return;
+  }
+  $('authMsg').textContent='Superadmin created — welcome, josh 👑';
+  loginAs(u);sbPullSilent();
+}
+async function cloudLogin(u,p){
+  const row=await cloudRoleRow(u);
+  if(!row) return $('authMsg').textContent='No such user — Register first.';
+  if(row.status==='pending') return $('authMsg').textContent='Approval pending — account yet to be approved by superadmin.';
+  if(row.status==='rejected') return $('authMsg').textContent='Account rejected — contact superadmin (josh).';
+  const {error}=await sb.auth.signInWithPassword({email:unameToEmail(u),password:p});
+  $('authPass').value='';
+  if(error){
+    if(/email not confirmed/i.test(error.message))
+      return $('authMsg').textContent='Supabase still requires email confirmation — ask josh to turn OFF “Confirm email” (Auth → Sign In/Up).';
+    if(/invalid login credentials/i.test(error.message)) return $('authMsg').textContent='Wrong password — try again.';
+    return $('authMsg').textContent='Login failed: '+error.message;
+  }
+  mirrorLocalStub(u,row.role,'approved');
+  loginAs(u);sbPullSilent();
+}
+// Resume a Supabase login on any device + connect silently at boot
+async function restoreCloudSession(){
+  try{initSupabaseFromStore()}catch{}
+  if(!sb||!sbConnected||currentUser) return;
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const em=session?.user?.email;if(!em) return;
+    const u=emailToUname(em);
+    const row=await cloudRoleRow(u);
+    if(!row||row.status!=='approved'){await sb.auth.signOut();return}
+    mirrorLocalStub(u,row.role,'approved');
+    loginAs(u);sbPullSilent();
+  }catch{}
+}
+// Silently pull this user's cloud finance (so data follows you across devices)
+async function sbPullSilent(){
+  if(!sb||!sbConnected||!currentUser||currentUser==='guest') return;
+  try{
+    const {data}=await sb.from('finance_states').select('data').eq('user_name',currentUser).single();
+    if(data?.data?.settings){
+      state=data.data;localStorage.setItem(dataKey(currentUser),JSON.stringify(state));
+      fillSettings();renderBudgets();render();toast('Cloud data loaded ☁');
+    }
+  }catch{}
+}
+// Auto-push finance to cloud (debounced) so every device stays current
+let pushT=null;
+function scheduleCloudPush(){
+  if(!sb||!sbConnected||!currentUser||currentUser==='guest'||!state) return;
+  clearTimeout(pushT);
+  pushT=setTimeout(async()=>{
+    try{await sb.from('finance_states').upsert({user_name:currentUser,data:state,updated_at:new Date().toISOString()},{onConflict:'user_name'})}catch{}
+  },5000);
+}
+// ---------- local auth (offline fallback: this browser only) ----------
+async function localRegister(u,p){
     const users=getUsers();
     if(users[u]){
       const st=users[u].status||'approved';
@@ -152,7 +258,6 @@ async function doRegister(){
     }
     $('authMsg').textContent='Superadmin created — welcome, josh 👑';
     loginAs(u);
-  }finally{btn.disabled=false}
 }
 async function doLogin(){
   const btn=$('loginBtn');btn.disabled=true;
@@ -161,6 +266,7 @@ async function doLogin(){
     if(!u||!p) return $('authMsg').textContent='Enter username and password.';
     if(!validUser(u)&&u!=='guest') return $('authMsg').textContent='Invalid username format.';
     if(u==='guest'){loginAs('guest');return}
+    if(sb&&sbConnected) return await cloudLogin(u,p); // global auth — any device, anywhere
     const users=getUsers(),rec=users[u];
     if(rec&&rec.cloudOnly&&!rec.hash){
       // stub synced from another device — password never leaves that device by design
@@ -556,11 +662,12 @@ document.addEventListener('DOMContentLoaded',()=>{
   $('guestBtn').onclick=()=>loginAs('guest');
   $('authPass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
   $('authUser').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
-  $('logoutBtn').onclick=()=>{localStorage.removeItem(SESSION_KEY);location.reload()};
+  $('logoutBtn').onclick=async()=>{try{await sb?.auth.signOut()}catch{};localStorage.removeItem(SESSION_KEY);location.reload()};
   try{setupHint()}catch(e){console.warn('setupHint',e)}
   const sess=getSession();
   if(sess){try{currentUser=sess.u;state=loadUser(sess.u)||seedForUser();$('authOverlay').classList.add('hidden');$('userBadge').textContent=sess.u;$('syncUser').textContent=sess.u;$('roleBadge').textContent=(getUsers()[sess.u]?.role==='superadmin'?'👑 superadmin':'user');$('sessInfo').textContent=sessLeft()}catch(e){console.warn('session restore',e)}}
   if(state){fillSettings();setTxType('expense');renderBudgets();initSupabaseFromStore();renderAdmin();render();fetchLiveFX()}
+  restoreCloudSession(); // silent auto-connect + resume Supabase login on any device
   $('adminRefresh').onclick=()=>{refreshAdminList();toast('Queue refreshed')};
   $('adminPullCloud').onclick=pullCloudQueue;
   $('adminBell').onclick=()=>document.getElementById('adminCard').scrollIntoView({behavior:'smooth'});
