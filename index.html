@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#0a1430" />
+<meta name="description" content="JOSH Finance — NGN-based tracker with live USD conversion, forecasts, PDF reports and cloud sync." />
+<link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+<link rel="apple-touch-icon" href="./favicon.svg" />
+<link rel="manifest" href="./site.webmanifest" />
+<title>JOSH — Personal Financial Tracker & Forecaster v2</title>
+<link rel="stylesheet" href="styles.css" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="./supabase-config.js"></script>
+</head>
+<body>
+
+<!-- AUTH OVERLAY -->
+<div id="authOverlay" class="auth-overlay">
+  <div class="auth-card">
+    <img src="./favicon.svg" alt="JOSH" class="auth-logo" width="64" height="64" />
+    <h1>JOSH Finance</h1>
+    <p class="hint">Private per-user vault. PBKDF2-hashed passwords, lockout protection & expiring sessions.<br>Use the same login on pages.dev to sync via Supabase.</p>
+    <label for="authUser">Username <span class="req">a–z 0–9 _ · 3–20 chars</span></label><input id="authUser" placeholder="e.g. josh" autocomplete="username" maxlength="20" />
+    <label for="authPass">Password <button id="showPass" type="button" class="linklike">show</button></label>
+    <input id="authPass" type="password" placeholder="min 8 chars, mix of cases/numbers/symbols" autocomplete="current-password" />
+    <div id="pwStrength" class="pw-meter"><i></i></div>
+    <small id="pwHint" class="hint"></small>
+    <div class="auth-row">
+      <button id="loginBtn" class="primary">Login</button>
+      <button id="registerBtn" class="ghost">Register</button>
+    </div>
+    <button id="guestBtn" class="ghost full">Continue as guest (local only)</button>
+    <p id="authMsg" class="hint" role="alert"></p>
+    <p class="hint tiny">Sessions expire after 12h • 5 wrong tries = 5-min lock • data never leaves your device unless Supabase sync is connected.</p>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="brand">
+    <img src="./favicon.svg" alt="J$" class="logo-img" width="46" height="46" />
+    <div>
+      <h1>JOSH Finance <span class="ver">v2</span></h1>
+      <p>₦-base • Live $ conversion • PDF • Sync • <span id="userBadge">—</span> <span id="cloudBadge" class="cloud-badge" title="Supabase cloud status">○ local</span></p>
+    </div>
+  </div>
+  <div class="top-actions">
+    <div class="fx-box live">
+      <label><span id="fxLiveDot" class="dot">●</span> <span id="fxLabel">LIVE ₦/$ …</span></label>
+      <small id="fxMeta" class="hint">fetching…</small>
+    </div>
+    <div class="fx-box">
+      <label>Display</label>
+      <div class="seg" id="currencySeg">
+        <button data-cur="NGN" class="active">NGN ₦</button>
+        <button data-cur="USD">USD $</button>
+        <button data-cur="BOTH">Both</button>
+      </div>
+    </div>
+    <button id="pdfBtn" class="pdf">📄 PDF Report</button>
+    <button id="syncBtn" class="ghost">⇅ Sync</button>
+    <button id="logoutBtn" class="ghost danger">Logout</button>
+  </div>
+</header>
+
+<main class="layout">
+  <aside class="panel">
+    <section class="card">
+      <h2>1 • Income & Grade Setup <span class="pill">since Sept 2026</span></h2>
+      <div class="grid2">
+        <div><label>Grade / Level label</label><input id="gradeLabel" value="GL —" /></div>
+        <div><label>Fixed Monthly Income (₦ NGN)</label><input id="monthlyIncomeNGN" type="number" min="0" step="500" value="100000" /><small class="peek" id="incomeUSDPeek"></small></div>
+        <div><label>Income effective from</label><input id="incomeSince" type="month" value="2026-09" /></div>
+        <div><label>Month tracked</label><input id="trackMonth" type="month" value="2026-09" /></div>
+        <div><label>Other income this month (₦)</label><input id="extraIncomeNGN" type="number" min="0" step="100" value="0" /></div>
+        <div><label>Savings target %</label><input id="savingsPct" type="number" min="0" max="80" value="20" /></div>
+      </div>
+      <div class="future-inline">
+        <h3>Future growth assumptions</h3>
+        <div class="grid3">
+          <div><label>Annual increment %</label><input id="incrementPct" type="number" value="5" step="0.1" /></div>
+          <div><label>Promotion bump %</label><input id="promoBump" type="number" value="15" step="0.5" /></div>
+          <div><label>Promotion in (yrs)</label><input id="promoIn" type="number" value="2" min="0" max="10" /></div>
+        </div>
+      </div>
+      <button id="saveSettings" class="primary">Save Settings</button>
+    </section>
+
+    <section class="card fx-card">
+      <h2>Live Exchange Rate <button id="fxRefresh" class="ghost sm">↻ Refresh</button></h2>
+      <div class="fx-big"><strong id="fxBig">₦ — / $1</strong><span id="fxChange"></span></div>
+      <small id="fxSource" class="hint"></small>
+      <div class="fx-controls">
+        <select id="fxRange"><option value="30">Last 30 points</option><option value="90">Last 90</option><option value="all" selected>All incl. 2026 trend</option></select>
+        <label class="manual">Manual override <input id="fxRate" type="number" step="0.01" /></label>
+      </div>
+      <canvas id="fxChart" height="150"></canvas>
+      <p class="hint">Auto-updates daily from open.er-api.com (ECB-fed). Every ₦ price is converted to $ at the <b>rate of its date</b>, totals use the live rate — consistent & auditable. Manual override only if offline.</p>
+    </section>
+
+    <section class="card">
+      <h2>2 • Add Transaction (₦)</h2>
+      <div class="tabs"><button id="tabExpense" class="active">− Expense</button><button id="tabIncome">+ Income</button></div>
+      <label>Date</label><input id="txDate" type="date" value="2026-09-15" />
+      <label>Category</label><select id="txCategory"></select>
+      <label>Amount (₦ Naira)</label><input id="txAmountNGN" type="number" min="0" step="100" placeholder="e.g. 30000" />
+      <small class="peek" id="txPeek"></small>
+      <label>Note</label><input id="txNote" placeholder="e.g. Dangote Refinery Shares" />
+      <button id="addTx" class="primary">Add Transaction</button>
+    </section>
+
+    <section class="card small">
+      <h2>Budget guardrails (₦/mo)</h2>
+      <div id="budgetList"></div>
+    </section>
+
+    <section class="card small" id="syncCard">
+      <h2>⇅ Login / Sync & Backup</h2>
+      <p class="hint">Logged in as <b id="syncUser">—</b> <span id="sessInfo" class="hint"></span>. Data auto-saves per user. Use backup to move devices.</p>
+      <div class="sync-btns">
+        <button id="exportBtn" class="ghost sm">Export CSV</button>
+        <button id="backupBtn" class="ghost sm">⬇ Backup JSON</button>
+        <label class="ghost sm import">⬆ Restore<input id="restoreFile" type="file" accept=".json" hidden /></label>
+      </div>
+      <label>Sync code (copy to other device)</label>
+      <div class="sync-code"><button id="copySync" class="ghost sm">Copy code</button><button id="pasteSync" class="ghost sm">Paste & restore</button></div>
+      <textarea id="syncArea" rows="2" placeholder="sync code appears here…"></textarea>
+      <h3 class="gold-h">◆ Supabase cloud (for pages.dev hosting)</h3>
+      <div class="grid2">
+        <div><label>Supabase URL</label><input id="sbUrl" placeholder="https://xyz.supabase.co" /></div>
+        <div><label>Supabase anon key</label><input id="sbKey" type="password" placeholder="eyJ…" /></div>
+      </div>
+      <div class="sync-btns">
+        <button id="sbConnect" class="primary sm">Connect</button>
+        <button id="sbPush" class="ghost sm gold">☁ Push to cloud</button>
+        <button id="sbPull" class="ghost sm gold">☁ Pull from cloud</button>
+      </div>
+      <small id="sbStatus" class="hint">Not connected — local mode. See README-DEPLOY.md.</small><br>
+      <small id="syncMeta" class="hint"></small><br>
+      <button id="resetBtn" class="ghost danger sm">Reset month data</button>
+    </section>
+  </aside>
+
+  <section class="maincol">
+    <div class="kpis">
+      <div class="kpi"><span>Total Income</span><strong id="kIncome">—</strong><em id="kIncomeN"></em></div>
+      <div class="kpi"><span>Spent MTD</span><strong id="kSpent">—</strong><em id="kSpentN"></em></div>
+      <div class="kpi highlight"><span>Remaining now</span><strong id="kRemain">—</strong><em id="kRemainN"></em></div>
+      <div class="kpi safe"><span>Safe-to-spend / day</span><strong id="kSafe">—</strong><em id="kDaysLeft"></em></div>
+      <div class="kpi" id="deficitCard"><span>Deficit / Surplus</span><strong id="kDeficit">—</strong><em id="kDeficitMsg"></em></div>
+      <div class="kpi"><span>Projected month-end</span><strong id="kProj">—</strong><em id="kProjMsg"></em></div>
+    </div>
+    <div id="alertBar"></div>
+
+    <div class="cards2">
+      <div class="card"><h2>Spend pace — can I still spend?</h2><canvas id="paceChart" height="180"></canvas>
+        <div class="stat-row"><div><label>Daily burn</label><b id="burnRate">—</b></div><div><label>Allowed/day (save goal)</label><b id="allowRate">—</b></div><div><label>Days left</label><b id="daysLeft2">—</b></div></div>
+        <p id="safeMsg" class="advice"></p></div>
+      <div class="card"><h2>Where money goes</h2><canvas id="catChart" height="180"></canvas><div id="catBreakdown" class="breakdown"></div></div>
+    </div>
+
+    <div class="cards2">
+      <div class="card"><h2>Expense forecast — next month</h2>
+        <div class="stat-row"><div><label>Forecast</label><b id="fcTotal">—</b><em id="fcTotalN"></em></div><div><label>Likely deficit/surplus</label><b id="fcDeficit">—</b></div><div><label>Confidence</label><b id="fcConf">—</b></div></div>
+        <div id="fcCats" class="breakdown"></div><canvas id="histChart" height="160"></canvas></div>
+      <div class="card"><h2>Future income — grade growth</h2>
+        <div class="grid3"><div><label>Years</label><select id="fcYears"><option>3</option><option selected>5</option><option>10</option></select></div>
+        <div><label>Show in</label><select id="fcCur"><option value="NGN" selected>NGN ₦</option><option value="USD">USD $</option></select></div>
+        <div><label>&nbsp;</label><button id="runForecast" class="primary sm">Recalc</button></div></div>
+        <canvas id="incomeChart" height="180"></canvas>
+        <div class="table-wrap"><table id="incomeTable"><thead><tr><th>Year</th><th>Monthly</th><th>Annual</th><th>Event</th></tr></thead><tbody></tbody></table></div>
+        <p id="promoMsg" class="advice"></p></div>
+    </div>
+
+    <div class="card">
+      <h2>Transactions <span id="txCount"></span> <button id="pdfBtn2" class="ghost sm">📄 PDF for this month</button></h2>
+      <div class="tx-tools"><input id="txSearch" placeholder="Search…" /><select id="txFilter"><option value="all">All</option><option value="expense">Expenses</option><option value="income">Income</option></select>
+      <label class="import">Import CSV<input id="importCsv" type="file" accept=".csv" hidden /></label></div>
+      <div class="table-wrap"><table id="txTable"><thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Note</th><th style="text-align:right">₦ / $</th><th></th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+</main>
+<div id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>

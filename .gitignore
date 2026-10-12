@@ -1,0 +1,5 @@
+# never commit real secrets — Supabase keys go via app UI (localStorage), not this file
+# keep placeholders in supabase-config.js
+.DS_Store
+Thumbs.db
+*.log
